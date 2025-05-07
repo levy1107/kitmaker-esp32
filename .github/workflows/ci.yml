@@ -1,13 +1,11 @@
 name: Build OTA Binary
 
-# Dispara el workflow cuando cambie el sketch o este mismo archivo
 on:
   push:
     paths:
       - "sketches/**"
       - ".github/workflows/ci.yml"
 
-# El job necesita permiso para escribir en el repositorio
 permissions:
   contents: write
 
@@ -16,59 +14,68 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    # 1- Checkout
+    # 1‑ Checkout
     - name: Checkout repo
       uses: actions/checkout@v3
       with:
         persist-credentials: true
 
-    # 2- Instalar Arduino-CLI
-    - name: Setup Arduino-CLI
+    # 2‑ Instalar Arduino‑CLI
+    - name: Setup Arduino‑CLI
       uses: arduino/setup-arduino-cli@v1
 
-    # 3- Instalar core ESP32 estable (2.0.14)
+    # 3‑ Instalar core ESP32
     - name: Install ESP32 core 2.0.14
       run: |
         arduino-cli core update-index
         arduino-cli core install esp32:esp32@2.0.14
 
-    # 4- Instalar librerías usadas por el sketch
-    - name: Install required libraries
+    # 4‑ Librerías necesarias
+    - name: Install libraries
       run: |
         arduino-cli lib update-index
-        arduino-cli lib install "Adafruit SSD1306" \
-                                 "Adafruit GFX Library" \
-                                 "Adafruit HTU21DF Library" \
-                                 "Adafruit NeoPixel"
+        arduino-cli lib install \
+          "Adafruit SSD1306" \
+          "Adafruit GFX Library" \
+          "ArduinoJson"
 
-    # 5- Preparar carpeta con el mismo nombre que el .ino
+    # 5‑ Copiar sketch
     - name: Prepare sketch folder
       run: |
         mkdir -p build/automatic
         cp sketches/automatic.ino build/automatic/automatic.ino
 
-    # 6- Compilar y exportar binarios
-    - name: Compile & export .bin
+    # 6‑ Compilar y exportar binarios
+    - name: Compile & export
       run: |
         arduino-cli compile \
           --fqbn esp32:esp32:esp32 \
           --export-binaries \
           build/automatic
 
-    # 7- Copiar el .bin a firmware/latest.bin y hacer push
-    - name: Publish latest.bin
+    # 7‑ Publicar firmware único + manifest
+    - name: Publish firmware & manifest
       env:
         TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
-        mkdir -p firmware
-        BIN=$(find build/automatic -type f -name "*.bin" | head -n1)
-        echo "Binario encontrado: $BIN"
-        if [ -z "$BIN" ]; then
-          echo "❌ No se generó ningún .bin"; exit 1
+        # Extraer versión del #define FW_VERSION "<stamp>"
+        VER=$(grep -oP '#define\s+FW_VERSION\s+"[0-9]+"' sketches/automatic.ino | grep -oP '[0-9]+' )
+        echo "Versión extraída: $VER"
+
+        BIN_SRC=$(find build/automatic -name "*.bin" | head -n1)
+        if [ -z "$BIN_SRC" ]; then
+          echo "❌ No se encontró .bin"; exit 1
         fi
-        cp "$BIN" firmware/latest.bin
+
+        FILE=firmware/firmware_${VER}.bin
+        mkdir -p firmware
+        cp "$BIN_SRC" "$FILE"
+
+        # Crear latest.json
+        echo "{\"version\":\"$VER\",\"url\":\"https://raw.githubusercontent.com/${{ github.repository }}/main/$FILE\"}" > firmware/latest.json
+
         git config user.name  "github-actions[bot]"
         git config user.email "actions@github.com"
-        git add firmware/latest.bin
-        git commit -m "🔨 Build latest.bin"
-        git push "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:main
+        git add "$FILE" firmware/latest.json
+        git commit -m "🔨 Build $VER"
+        git push "https://x-access-token:${TOKEN}@github.com/${{ github.repository }}.git" HEAD:main
