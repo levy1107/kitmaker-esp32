@@ -6,13 +6,14 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 
-#define FW_VERSION "202505071333"
+#define FW_VERSION "202505071423"
 
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
 #define OLED_RESET   -1
 
 #define OTA_BUTTON    15
+#define LDR_PIN       39
 
 const char* ssid = "PoloTics";
 const char* pass = "P4L4T3cs";
@@ -57,6 +58,7 @@ void check_ota(){
 void setup(){
   Serial.begin(115200);
   pinMode(OTA_BUTTON,INPUT_PULLUP);
+  pinMode(LDR_PIN, INPUT);
 
   oled.begin(SSD1306_SWITCHCAPVCC,0x3C); show("HOLA", nullptr, 2);
   WiFi.begin(ssid,pass); while(WiFi.status()!=WL_CONNECTED){delay(300);}
@@ -64,10 +66,15 @@ void setup(){
 
 void loop(){
   static bool chk=false; static unsigned long t0=0;
+  int ldrValue = analogRead(LDR_PIN);
+  int ldrPercent = map(ldrValue, 0, 4095, 0, 100);
+
   if(digitalRead(OTA_BUTTON)==LOW){
     if(!chk){ chk=true; t0=millis(); }
     else if(millis()-t0>5000){ check_ota(); chk=false; }
   }else chk=false;
+
+  show("Luz =", String(ldrPercent) + " %");
 
   delay(800);
 }
