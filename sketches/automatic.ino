@@ -1,3 +1,4 @@
+
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <Update.h>
@@ -5,7 +6,7 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 
-#define FW_VERSION "202505081215"
+#define FW_VERSION "202505071247"
 
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
@@ -70,8 +71,8 @@ void loop(){
   int pct = analogRead(LDR_PIN)*100/4095;
   show("", "lux:"+String(pct)+"%", 2);
 
-  // si lux > 50 % suena 200 ms
-  if(pct>50){ ledcWrite(0,128); delay(200); ledcWrite(0,0); }
+  // si lux > 30 % suena 200 ms
+  if(pct>30){ ledcWrite(0,128); delay(200); ledcWrite(0,0); }
 
   static bool chk=false; static unsigned long t0=0;
   if(digitalRead(OTA_BUTTON)==LOW){
