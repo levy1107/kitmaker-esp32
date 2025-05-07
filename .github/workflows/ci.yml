@@ -1,4 +1,4 @@
-name: Build OTA Binary
+name: Build & Publish OTA Binary (jsDelivr)
 
 on:
   push:
@@ -14,77 +14,79 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1‑ Checkout
-      - name: Checkout repo
-        uses: actions/checkout@v3
-        with:
-          persist-credentials: true
+    # 1 – Checkout
+    - name: Checkout
+      uses: actions/checkout@v3
+      with:
+        persist-credentials: true
 
-      # 2‑ Instalar Arduino‑CLI
-      - name: Setup Arduino‑CLI
-        uses: arduino/setup-arduino-cli@v1
+    # 2 – Arduino‑CLI
+    - name: Setup Arduino‑CLI
+      uses: arduino/setup-arduino-cli@v1
 
-      # 3‑ Instalar core ESP32
-      - name: Install ESP32 core 2.0.14
-        run: |
-          arduino-cli core update-index
-          arduino-cli core install esp32:esp32@2.0.14
+    # 3 – ESP32 core 2.0.14
+    - name: Install ESP32 core
+      run: |
+        arduino-cli core update-index
+        arduino-cli core install esp32:esp32@2.0.14
 
-      # 4‑ Librerías necesarias
-      - name: Install libraries
-        run: |
-          arduino-cli lib update-index
-          arduino-cli lib install \
-            "Adafruit SSD1306" \
-            "Adafruit GFX Library" \
-            "ArduinoJson"
+    # 4 – Librerías requeridas
+    - name: Install libraries
+      run: |
+        arduino-cli lib update-index
+        arduino-cli lib install "Adafruit SSD1306" \
+                                "Adafruit GFX Library" \
+                                "ArduinoJson"
 
-      # 5‑ Copiar sketch
-      - name: Prepare sketch folder
-        run: |
-          mkdir -p build/automatic
-          cp sketches/automatic.ino build/automatic/automatic.ino
+    # 5 – Preparar carpeta de build
+    - name: Copy sketch
+      run: |
+        mkdir -p build/automatic
+        cp sketches/automatic.ino build/automatic/automatic.ino
 
-      # 6‑ Compilar y exportar binarios
-      - name: Compile & export
-        run: |
-          arduino-cli compile \
-            --fqbn esp32:esp32:esp32 \
-            --export-binaries \
-            build/automatic
+    # 6 – Compilar y exportar .bin
+    - name: Compile firmware
+      run: |
+        arduino-cli compile \
+          --fqbn esp32:esp32:esp32 \
+          --export-binaries \
+          build/automatic
 
-      # 7‑ Publicar firmware único + manifest
-      - name: Publish firmware & manifest
-        env:
-          TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        shell: bash
-        run: |
-          set -e
-          # 1. Extraer versión
-          RAW=$(grep -oP '#define\s+FW_VERSION\s+"[^"]+"' sketches/automatic.ino | head -n1)
-          VER=$(echo "$RAW" | grep -oP '[0-9]+' || true)
-          if [[ -z "$VER" ]]; then
-            echo "❌ FW_VERSION sin dígitos"; exit 1
-          fi
-          echo "Versión: $VER"
+    # 7 – Publicar binario + manifest (jsDelivr)
+    - name: Publish firmware & manifest
+      env:
+        TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      shell: bash
+      run: |
+        set -e
 
-          # 2. Ubicar binario
-          BIN_SRC=$(find build/automatic -name "*.bin" | head -n1)
-          if [[ -z "$BIN_SRC" ]]; then
-            echo "❌ No se encontró .bin"; exit 1
-          fi
+        # ── 1. extraer versión (YYYYMMDDHHMM)
+        RAW=$(grep -oP '#define\s+FW_VERSION\s+"[^"]+"' sketches/automatic.ino | head -n1)
+        VER=$(echo "$RAW" | grep -oP '[0-9]+' || true)
+        if [[ -z "$VER" ]]; then
+          echo "❌ FW_VERSION sin dígitos"; exit 1
+        fi
+        echo "Versión: $VER"
 
-          # 3. Copiar y versionar
-          mkdir -p firmware
-          FILE=firmware/firmware_${VER}.bin
-          cp "$BIN_SRC" "$FILE"
+        # ── 2. localizar binario
+        BIN_SRC=$(find build/automatic -name "*.bin" | head -n1)
+        if [[ -z "$BIN_SRC" ]]; then
+          echo "❌ No se generó .bin"; exit 1
+        fi
 
-          # 4. latest.json
-          echo "{\"version\":\"$VER\",\"url\":\"https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/$FILE\"}" > firmware/latest.json
+        # ── 3. copiar al repo (versionado)
+        mkdir -p firmware
+        FILE=firmware/firmware_${VER}.bin
+        cp "$BIN_SRC" "$FILE"
 
-          # 5. Commit
-          git config user.name  "github-actions[bot]"
-          git config user.email "actions@github.com"
-          git add "$FILE" firmware/latest.json
-          git commit -m "🔨 Build $VER"
-          git push "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:main
+        # ── 4. crear latest.json con URL jsDelivr
+        CDN_URL="https://cdn.jsdelivr.net/gh/${GITHUB_REPOSITORY}@main/$FILE"
+        echo "{\"version\":\"$VER\",\"url\":\"${CDN_URL}\"}" > firmware/latest.json
+        echo "Manifest -> $CDN_URL"
+
+        # ── 5. commit & push
+        git config user.name  "github-actions[bot]"
+        git config user.email "actions@github.com"
+        git add "$FILE" firmware/latest.json
+        git commit -m "🔨 Build $VER"
+        git push "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:main
