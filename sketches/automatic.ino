@@ -1,111 +1,83 @@
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <Update.h>
-
-#include <Wire.h>
+#include <ArduinoJson.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 
-#define FW_VERSION    "202505051500"
+#define FW_VERSION "YYYYMMDDHHMM"
 
-// ─── Hardware ───────────────────────────────────────
-#define SCREEN_WIDTH   128
-#define SCREEN_HEIGHT   64
-#define OLED_RESET      -1
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+#define OLED_RESET   -1
 
-#define LDR_PIN         39   // lectura de luminosidad
-#define OTA_BUTTON_PIN  15   // pull-OTA al mantener 5 s
-// ────────────────────────────────────────────────────
+#define LDR_PIN       39
+#define OTA_BUTTON    15
+#define BUZZER_PIN    12          // PWM canal‑0 2 kHz
 
-// Wi-Fi & OTA
-const char* ssid         = "PoloTics";
-const char* password     = "P4L4T3cs";
-const char* FIRMWARE_URL =
-  "https://raw.githubusercontent.com/levy1107/kitmaker-esp32/main/firmware/latest.bin";
+const char* ssid = "PoloTics";
+const char* pass = "P4L4T3cs";
 
-Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+const char* MANIFEST_BASE =
+  "https://raw.githubusercontent.com/levy1107/kitmaker-esp32/main/firmware/latest.json";
 
-// Muestra dos líneas centradas
-void show(const char* l1, const char* l2 = nullptr, uint8_t s = 2) {
-  display.clearDisplay();
-  display.setTextSize(s);
-  display.setTextColor(SSD1306_WHITE);
-  int y = (SCREEN_HEIGHT - 8 * s * (l2 ? 2 : 1)) / 2;
-  display.setCursor(0, y);
-  display.print(l1);
-  if (l2) {
-    display.setCursor(0, y + 8 * s);
-    display.print(l2);
-  }
-  display.display();
+Adafruit_SSD1306 oled(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+
+void show(const char* a,const char* b=nullptr,uint8_t s=2){
+  oled.clearDisplay(); oled.setTextSize(s); oled.setTextColor(SSD1306_WHITE);
+  oled.setCursor(0,0); oled.print(a);
+  if(b){ oled.setCursor(0,8*s); oled.print(b); }
+  oled.display();
+}
+inline void show(const char* a,const String& b,uint8_t s=2){ show(a,b.c_str(),s); }
+
+bool flash(String url){
+  HTTPClient http; http.setFollowRedirects(HTTPC_FORCE_FOLLOW_REDIRECTS);
+  http.begin(url); int c=http.GET(); if(c!=HTTP_CODE_OK) return false;
+  int len=http.getSize(); if(len<=0||!Update.begin(len)) return false;
+  size_t w=Update.writeStream(*http.getStreamPtr());
+  return (w==len && Update.end());
 }
 
-void setup() {
+void check_ota(){
+  String man = String(MANIFEST_BASE)+"?ts="+millis();
+  HTTPClient http; http.setFollowRedirects(HTTPC_FORCE_FOLLOW_REDIRECTS);
+  http.begin(man); if(http.GET()!=HTTP_CODE_OK){ show("Sin","manifest"); return; }
+
+  DynamicJsonDocument d(384);
+  if(deserializeJson(d,http.getStream())){ show("JSON","err"); return; }
+  String ver=d["version"]|""; String url=d["url"]|"";
+
+  if(ver.toInt()>String(FW_VERSION).toInt()){
+    show("Actualiza","->"+ver);
+    if(flash(url)){ show("OTA OK","Reboot"); delay(800); ESP.restart(); }
+    else show("Err","update");
+  }else show("Ya","al dia");
+}
+
+void setup(){
   Serial.begin(115200);
-  Serial.println(F("FW " FW_VERSION));
+  pinMode(OTA_BUTTON,INPUT_PULLUP);
+  pinMode(LDR_PIN,INPUT);
+  pinMode(BUZZER_PIN,OUTPUT);
+  ledcSetup(0,2000,8); ledcAttachPin(BUZZER_PIN,0);
 
-  pinMode(OTA_BUTTON_PIN, INPUT_PULLUP);
-  pinMode(LDR_PIN,       INPUT);
-
-  Wire.begin();
-  display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
-  show("Boot…");
-
-  // Conectar Wi-Fi
-  WiFi.begin(ssid, password);
-  show("Wi-Fi","conectando");
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-  }
-  show("Wi-Fi OK", WiFi.localIP().toString().c_str());
-  delay(800);
+  oled.begin(SSD1306_SWITCHCAPVCC,0x3C); show("FW",FW_VERSION,1);
+  WiFi.begin(ssid,pass); while(WiFi.status()!=WL_CONNECTED){delay(300);}
 }
 
-void loop() {
-  // ── Lectura LDR ──
-  int raw = analogRead(LDR_PIN);
-  int pct = map(raw, 0, 4095, 0, 100);
-  display.clearDisplay();
-  display.setTextSize(2);
-  display.setCursor(0, 0);
-  display.printf("L:%d%%", pct);
-  display.display();
+void loop(){
+  int pct = analogRead(LDR_PIN)*100/4095;
+  show("", "lux:"+String(pct)+"%", 2);
 
-  // ── OTA (mantener botón 5 s) ──
-  static bool checking = false;
-  static unsigned long t0 = 0;
+  // si lux > 50 % suena 200 ms
+  if(pct>50){ ledcWrite(0,128); delay(200); ledcWrite(0,0); }
 
-  if (digitalRead(OTA_BUTTON_PIN) == LOW) {
-    if (!checking) {
-      checking = true;
-      t0 = millis();
-    } else if (millis() - t0 >= 5000) {
-      show("OTA","buscando");
-      HTTPClient http;
-      http.setFollowRedirects(HTTPC_FORCE_FOLLOW_REDIRECTS);
-      http.begin(FIRMWARE_URL);
-      int code = http.GET();
-      Serial.printf("HTTP %d\n", code);
-      if (code == HTTP_CODE_OK) {
-        int len = http.getSize();
-        if (len > 0 && Update.begin(len)) {
-          WiFiClient *stream = http.getStreamPtr();
-          size_t written = Update.writeStream(*stream);
-          if (written == len && Update.end()) {
-            show("OTA OK","Reboot");
-            delay(800);
-            ESP.restart();
-          }
-        }
-      } else {
-        show("Sin","update");
-      }
-      http.end();
-      checking = false;
-    }
-  } else {
-    checking = false;
-  }
+  static bool chk=false; static unsigned long t0=0;
+  if(digitalRead(OTA_BUTTON)==LOW){
+    if(!chk){ chk=true; t0=millis(); }
+    else if(millis()-t0>5000){ check_ota(); chk=false; }
+  }else chk=false;
 
-  delay(200);
+  delay(800);
 }
