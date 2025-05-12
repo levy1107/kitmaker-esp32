@@ -6,7 +6,7 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 
-#define FW_VERSION "202505071427"
+#define FW_VERSION "202505121350"
 
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
@@ -15,8 +15,8 @@
 #define OTA_BUTTON    15
 #define LDR_PIN       39
 
-const char* ssid = "FAN-IOT";
-const char* pass = "f4n10t2020";
+const char* ssid = "PoloTics";
+const char* pass = "P4L4T3cs";
 
 const char* MANIFEST_BASE =
   "https://raw.githubusercontent.com/levy1107/kitmaker-esp32/main/firmware/latest.json";
@@ -67,14 +67,14 @@ void setup(){
 void loop(){
   static bool chk=false; static unsigned long t0=0;
   int ldrValue = analogRead(LDR_PIN);
-  int ldrPercent = map(ldrValue, 0, 4095, 0, 100);
+  int ldrScale = map(ldrValue, 0, 4095, 1, 10);
 
   if(digitalRead(OTA_BUTTON)==LOW){
     if(!chk){ chk=true; t0=millis(); }
     else if(millis()-t0>5000){ check_ota(); chk=false; }
   }else chk=false;
 
-  show("Luz =", String(ldrPercent) + " %");
+  show("Luz =", String(ldrScale));
 
   delay(800);
 }
